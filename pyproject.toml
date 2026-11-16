@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bazar-historias-cli"
+version = "0.1.0"
+description = "Command-line client for Bazar Historias"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["beautifulsoup4>=4.12,<5", "click>=8.1,<9", "requests>=2.31,<3"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+bazar = "bazar.cli:cli"
+
+[tool.setuptools.packages.find]
+include = ["bazar*"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
