@@ -1,4 +1,10 @@
-# Bazar Historias CLI
+<p align="center">
+  <img src="public/bazar-historias-logo.png" alt="Bazar Historias CLI logo" width="200">
+</p>
+
+<h1 align="center">Bazar Historias CLI</h1>
+
+<p align="center">Search the Bazar Historias catalog and view your account from the terminal.</p>
 
 Search the [Bazar Historias](https://bazarhistorias.pe/) catalog and view your account from the terminal. Searches are limited to English-language titles, including individual issues and collected editions such as TPBs, hardcovers, and deluxe editions.
 
