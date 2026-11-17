@@ -24,7 +24,7 @@ Run `bazar --help` to see all commands. Activate the virtual environment again w
 
 ## Set up your account
 
-Create a `.env` file in the project root with your Bazar Historias credentials:
+Copy `.env.example` to `.env` in the project root and fill in your Bazar Historias credentials:
 
 ```dotenv
 BAZAR_EMAIL=your_email
