@@ -225,10 +225,13 @@ def test_product_sku_reads_span_and_skips_off_domain(monkeypatch):
     assert client.product_sku(None) is None
 
 
-def test_search_with_sku_enriches_results_and_is_opt_in(monkeypatch):
+def test_search_with_sku_from_thumbnail_and_falls_back_to_page(monkeypatch):
     client = BazarClient()
     hits = [
-        {"id": 1, "title": "A", "url": "https://bazarhistorias.pe/product/a/"},
+        # the barcode is embedded in the thumbnail URL → no product page request
+        {"id": 1, "title": "A", "url": "https://bazarhistorias.pe/product/a/",
+         "thumbnail": "https://cdn.bazarhistorias.cl/cover/76194138584602241_w400"},
+        # no barcode in the thumbnail → falls back to the product page's span.sku
         {"id": 2, "title": "B", "url": "https://bazarhistorias.pe/product/b/"},
     ]
 
@@ -244,10 +247,16 @@ def test_search_with_sku_enriches_results_and_is_opt_in(monkeypatch):
             return {"hits": hits[offset:], "estimatedTotalHits": len(hits)}
 
     monkeypatch.setattr(client.session, "post", lambda url, *, json, timeout: Response(json))
-    skus = {"https://bazarhistorias.pe/product/a/": "76194138584602241", "https://bazarhistorias.pe/product/b/": None}
-    monkeypatch.setattr(client, "product_sku", lambda url: skus[url])
+    fetched = []
+
+    def fake_product_sku(url):
+        fetched.append(url)
+        return {"https://bazarhistorias.pe/product/b/": "75960621451800131"}.get(url)
+
+    monkeypatch.setattr(client, "product_sku", fake_product_sku)
     enriched = client.search("Batman", with_sku=True)["products"]
-    assert [product["sku"] for product in enriched] == ["76194138584602241", None]
+    assert [product["sku"] for product in enriched] == ["76194138584602241", "75960621451800131"]
+    assert fetched == ["https://bazarhistorias.pe/product/b/"]  # only B hit the page; A came from its thumbnail
     assert all("sku" not in product for product in client.search("Batman")["products"])
 
 

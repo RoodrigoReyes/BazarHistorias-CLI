@@ -273,9 +273,17 @@ class BazarClient:
             else:
                 hits = collect(query)
                 total = len(hits)
-        products = [{k: hit.get(k) for k in ("id", "title", "price", "fulfillment_mode", "availability_label", "url")} for hit in hits]
+        products = [{k: hit.get(k) for k in ("id", "title", "price", "fulfillment_mode", "availability_label", "url", "thumbnail")} for hit in hits]
         if with_sku:
+            def sku_for(product):  # the barcode is embedded in the thumbnail URL (/cover/<barcode>_...); hit the product page only when it isn't there
+                match = re.search(r"/cover/(\d+)", product.get("thumbnail") or "")
+                if match:
+                    return match.group(1)
+                try:
+                    return self.product_sku(product["url"])
+                except Exception:  # one failed page yields a null sku, never aborts the search
+                    return None
             with ThreadPoolExecutor(max_workers=8) as pool:
-                skus = pool.map(self.product_sku, [product["url"] for product in products])
+                skus = list(pool.map(sku_for, products))
             products = [{**product, "sku": sku} for product, sku in zip(products, skus)]
         return {"total": total, "page": page, "products": products}
