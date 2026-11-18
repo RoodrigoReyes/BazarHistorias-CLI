@@ -7,8 +7,11 @@ from bazar import cli
 
 
 class FakeClient:
-    def orders(self, date_from=None, date_to=None, status=None):
+    def orders(self, date_from=None, date_to=None, status=None, realized=False):
         return [{"id": "123", "status": "completed"}]
+
+    def spend(self, date_from=None, date_to=None, realized=False):
+        return [{"Month": "2026-01", "Orders": 1, "Total": "S/ 54.10"}]
 
     def order(self, order_id):
         return {"id": order_id}

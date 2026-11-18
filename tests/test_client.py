@@ -42,13 +42,45 @@ def test_order_filters_use_iso_dates_and_status_across_pages(monkeypatch):
 
     pages = {
         "orders/": page([("1", "2026-01-01", "En proceso"), ("2", "2026-01-02", "Completado")], '<a class="woocommerce-button--next" href="/my-account-2/orders/page/2/">Next</a>'),
-        "https://bazarhistorias.pe/my-account-2/orders/page/2/": page([("3", "2026-01-03", "EN PROCESO"), ("4", "2026-01-04", "En proceso")]),
+        "https://bazarhistorias.pe/my-account-2/orders/page/2/": page([("3", "2026-01-03", "EN PROCESO"), ("4", "2026-01-04", "Solicitado parcial"), ("5", "2026-01-05", "Cancelado")]),
     }
     monkeypatch.setattr(client, "_page", pages.__getitem__)
     assert [row["Order"] for row in client.orders(date(2026, 1, 1), date(2026, 1, 3), "proceso")] == ["1", "3"]
-    assert len(client.orders()) == 4
+    assert [row["Order"] for row in client.orders(realized=True)] == ["1", "2", "3", "4"]
+    assert len(client.orders()) == 5
     with pytest.raises(ValueError, match="Start date"):
         client.orders(date(2026, 2, 1), date(2026, 1, 1))
+
+
+def test_spend_groups_totals_by_month_and_excludes_cancelled(monkeypatch):
+    client = BazarClient()
+    def cell(number, day, status, total):
+        return (f'<tr><th>{number}</th>'
+                f'<td class="woocommerce-orders-table__cell-order-date"><time datetime="{day}T10:00:00-05:00">{day}</time></td>'
+                f'<td class="woocommerce-orders-table__cell-order-status">{status}</td>'
+                f'<td>{total}</td></tr>')
+    body = "".join([
+        cell("1", "2026-01-05", "Completado", "S/ 54,10 para 2 elementos"),
+        cell("2", "2026-01-20", "En proceso", "S/ 1.234,56"),
+        cell("3", "2026-02-02", "Completado", "S/ 10,00"),
+        cell("4", "2026-02-10", "Cancelado", "S/ 999,99"),
+    ])
+    page = BeautifulSoup(f'<table class="woocommerce-orders-table"><thead><tr><th>Pedido</th><th>Fecha</th><th>Estado</th><th>Total</th></tr></thead><tbody>{body}</tbody></table>', "html.parser")
+    monkeypatch.setattr(client, "_page", lambda path: page)
+    assert client.spend() == [
+        {"Month": "2026-01", "Orders": 2, "Total": "S/ 1,288.66"},
+        {"Month": "2026-02", "Orders": 1, "Total": "S/ 10.00"},
+        {"Month": "Total", "Orders": 3, "Total": "S/ 1,298.66"},
+    ]
+    assert client.spend(realized=True) == [
+        {"Month": "2026-01", "Orders": 1, "Total": "S/ 54.10"},
+        {"Month": "2026-02", "Orders": 1, "Total": "S/ 10.00"},
+        {"Month": "Total", "Orders": 2, "Total": "S/ 64.10"},
+    ]
+    assert client.spend(date_from=date(2026, 2, 1)) == [
+        {"Month": "2026-02", "Orders": 1, "Total": "S/ 10.00"},
+        {"Month": "Total", "Orders": 1, "Total": "S/ 10.00"},
+    ]
 
 
 def test_order_filter_rejects_missing_date(monkeypatch):

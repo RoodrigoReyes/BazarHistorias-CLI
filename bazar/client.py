@@ -3,6 +3,7 @@
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from decimal import Decimal
 from itertools import zip_longest
 from urllib.parse import urljoin, urlparse
 
@@ -18,6 +19,20 @@ ACCOUNT = urljoin(BASE, "my-account-2/")
 
 def clean(node):
     return node.get_text(" ", strip=True) if node else ""
+
+
+def order_date_of(element):
+    time = element.select_one(".woocommerce-orders-table__cell-order-date time[datetime]")
+    try:
+        return date.fromisoformat(time["datetime"][:10])
+    except (TypeError, ValueError, KeyError):
+        raise RuntimeError("An order has a missing or invalid date; cannot filter orders.") from None
+
+
+def order_total(text):
+    # Site totals are European (e.g. "S/ 173,89 para 5 elementos"); match output.format_money.
+    match = re.search(r"S/\s*((?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d{2})?)", text)
+    return Decimal(match.group(1).replace(".", "").replace(",", ".")) if match else None
 
 
 def order_status(cell):
@@ -103,12 +118,7 @@ class BazarClient:
     def account(self):
         return {"account": clean(self._page())}
 
-    def orders(self, date_from=None, date_to=None, status=None):
-        if date_from and date_to and date_from > date_to:
-            raise ValueError("Start date must not be after end date.")
-        if status is not None and not status.strip():
-            raise ValueError("Status must not be empty.")
-        rows = []
+    def _order_pages(self):
         path = "orders/"
         visited = set()
         while path:
@@ -121,31 +131,7 @@ class BazarClient:
             if table:
                 parsed = table_rows(table)
                 elements = [row for row in table.select("tbody tr") if row.find_all(["td", "th"], recursive=False)]
-                for element, order in zip(elements, parsed):
-                    status_cell = element.select_one(".woocommerce-orders-table__cell-order-status")
-                    current_status = order_status(status_cell)
-                    if status_cell and "Estado" in order:
-                        order["Estado"] = current_status
-                        tracking = status_cell.select_one('.bh-order-tracking__step[aria-current="step"] .bh-order-tracking__label, .bh-order-tracking__step--current .bh-order-tracking__label')
-                        order["Seguimiento"] = clean(tracking) or None
-                    if date_from or date_to:
-                        time = element.select_one(".woocommerce-orders-table__cell-order-date time[datetime]")
-                        try:
-                            order_date = date.fromisoformat(time["datetime"][:10])
-                        except (TypeError, ValueError, KeyError):
-                            raise RuntimeError("An order has a missing or invalid date; cannot filter orders.") from None
-                        if (date_from and order_date < date_from) or (date_to and order_date > date_to):
-                            continue
-                    if status:
-                        if not current_status:
-                            raise RuntimeError("An order has no status; cannot filter orders.")
-                        query = status.strip().casefold()
-                        if query == "canceled":
-                            query = "cancelled"
-                        english = ORDER_STATUSES.get(current_status.casefold(), current_status).casefold()
-                        if query not in english and query not in current_status.casefold():
-                            continue
-                    rows.append(order)
+                yield from zip(elements, parsed)
             elif not page.select_one(".woocommerce-info"):
                 raise RuntimeError("Order table not found. The site may have changed.")
             next_link = page.select_one("a.woocommerce-button--next[href]")
@@ -156,6 +142,63 @@ class BazarClient:
                 path = next_url
             else:
                 path = None
+
+    def orders(self, date_from=None, date_to=None, status=None, realized=False):
+        if date_from and date_to and date_from > date_to:
+            raise ValueError("Start date must not be after end date.")
+        if status is not None and not status.strip():
+            raise ValueError("Status must not be empty.")
+        rows = []
+        for element, order in self._order_pages():
+            status_cell = element.select_one(".woocommerce-orders-table__cell-order-status")
+            current_status = order_status(status_cell)
+            if status_cell and "Estado" in order:
+                order["Estado"] = current_status
+                tracking = status_cell.select_one('.bh-order-tracking__step[aria-current="step"] .bh-order-tracking__label, .bh-order-tracking__step--current .bh-order-tracking__label')
+                order["Seguimiento"] = clean(tracking) or None
+            if (date_from or date_to):
+                order_date = order_date_of(element)
+                if (date_from and order_date < date_from) or (date_to and order_date > date_to):
+                    continue
+            if status or realized:
+                if not current_status:
+                    raise RuntimeError("An order has no status; cannot filter orders.")
+                english = ORDER_STATUSES.get(current_status.casefold(), current_status).casefold()
+            if realized and english == "cancelled":
+                continue
+            if status:
+                query = status.strip().casefold()
+                if query == "canceled":
+                    query = "cancelled"
+                if query not in english and query not in current_status.casefold():
+                    continue
+            rows.append(order)
+        return rows
+
+    def spend(self, date_from=None, date_to=None, realized=False):
+        """Total spent per YYYY-MM purchase month; excludes cancelled orders."""
+        if date_from and date_to and date_from > date_to:
+            raise ValueError("Start date must not be after end date.")
+        months = {}
+        for element, order in self._order_pages():
+            current_status = order_status(element.select_one(".woocommerce-orders-table__cell-order-status"))
+            english = ORDER_STATUSES.get(current_status.casefold(), current_status).casefold()
+            if english == "cancelled":
+                continue
+            if realized and english not in ("completed", "paid"):
+                continue
+            order_date = order_date_of(element)
+            if (date_from and order_date < date_from) or (date_to and order_date > date_to):
+                continue
+            amount = order_total(order.get("Total", ""))
+            if amount is None:
+                continue
+            count, total = months.get(order_date.strftime("%Y-%m"), (0, Decimal("0")))
+            months[order_date.strftime("%Y-%m")] = (count + 1, total + amount)
+        rows = [{"Month": key, "Orders": c, "Total": f"S/ {t:,.2f}"} for key, (c, t) in sorted(months.items())]
+        if rows:
+            grand = sum((t for _, t in months.values()), Decimal("0"))
+            rows.append({"Month": "Total", "Orders": sum(c for c, _ in months.values()), "Total": f"S/ {grand:,.2f}"})
         return rows
 
     def order(self, order_id):

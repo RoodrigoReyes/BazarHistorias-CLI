@@ -62,6 +62,7 @@ OPERATIONS = {
     "logout": ("Removing the local session", "Local session removed"),
     "account": ("Fetching account details", "Account details retrieved"),
     "orders": ("Fetching orders", "Orders retrieved"),
+    "spend": ("Totaling spend by month", "Spend totaled"),
     "order": ("Fetching order details", "Order details retrieved"),
     "bazarcoins": ("Fetching BazarCoins", "BazarCoins retrieved"),
     "addresses": ("Fetching addresses", "Addresses retrieved"),
@@ -109,6 +110,7 @@ def cli(ctx: click.Context) -> None:
       bazar account                 Show account details
       bazar orders                  List and filter orders
       bazar orders show ORDER_ID    Show an order
+      bazar spend                   Total spend by purchase month
       bazar bazarcoins              Show balance and activity
       bazar addresses               Show saved addresses
       bazar wishlist                Show the wishlist
@@ -160,21 +162,25 @@ def logout(ctx: click.Context) -> None:
 @click.option("--from", "date_from", type=click.DateTime(formats=["%Y-%m-%d"]), help="Include orders on or after YYYY-MM-DD.")
 @click.option("--to", "date_to", type=click.DateTime(formats=["%Y-%m-%d"]), help="Include orders on or before YYYY-MM-DD.")
 @click.option("--status", help="Match part of the English order status, ignoring case.")
+@click.option("--realized", is_flag=True, help="Exclude cancelled orders.")
 @output_options
 @click.pass_context
-def orders(ctx: click.Context, date_from, date_to, status) -> None:
+def orders(ctx: click.Context, date_from, date_to, status, realized) -> None:
     """List orders and filter by date or status.
 
     \b
     Examples:
       bazar orders
+      bazar orders --realized
       bazar orders --status completed
       bazar orders --from 2026-01-01 --to 2026-12-31
       bazar orders show 12345
     """
+    if realized and status is not None:
+        raise click.UsageError("Use --realized or --status, not both.")
     if ctx.invoked_subcommand is None:
-        _call(ctx, "orders", date_from.date() if date_from else None, date_to.date() if date_to else None, status)
-    elif date_from or date_to or status is not None:
+        _call(ctx, "orders", date_from.date() if date_from else None, date_to.date() if date_to else None, status, realized)
+    elif date_from or date_to or status is not None or realized:
         raise click.UsageError("Order filters apply to the order list, not subcommands.")
 
 
@@ -185,6 +191,24 @@ def orders(ctx: click.Context, date_from, date_to, status) -> None:
 def order(ctx: click.Context, order_id: str) -> None:
     """Show order details."""
     _call(ctx, "order", order_id)
+
+
+@cli.command()
+@click.option("--from", "date_from", type=click.DateTime(formats=["%Y-%m-%d"]), help="Include orders on or after YYYY-MM-DD.")
+@click.option("--to", "date_to", type=click.DateTime(formats=["%Y-%m-%d"]), help="Include orders on or before YYYY-MM-DD.")
+@click.option("--realized", is_flag=True, help="Count only completed purchases (Completed or Paid).")
+@output_options
+@click.pass_context
+def spend(ctx: click.Context, date_from, date_to, realized) -> None:
+    """Total spend grouped by YYYY-MM purchase month (excludes cancelled).
+
+    \b
+    Examples:
+      bazar spend
+      bazar spend --realized
+      bazar spend --from 2026-01-01 --to 2026-12-31
+    """
+    _call(ctx, "spend", date_from.date() if date_from else None, date_to.date() if date_to else None, realized)
 
 
 @cli.command()
